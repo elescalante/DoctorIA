@@ -2,12 +2,13 @@
 // Incluye el archivo de configuración, que define la conexión $pdo
 require_once 'config.php';
 
-// Inicializa $accion. Esto asegura que siempre tenga un valor (cadena vacía)
-// incluso si el script es accedido directamente o sin datos POST.
-$accion = $_POST['accion'] ?? '';
+// Inicializa $accion. Usamos el operador de fusión de null (??) para
+// obtener la acción desde POST o GET, lo que esté disponible.
+$accion = $_POST['accion'] ?? $_GET['accion'] ?? '';
 
-// Asegúrate de que la solicitud es POST. Esto es crucial para la seguridad
-// y para el flujo de trabajo de tu aplicación.
+// --- Manejo de solicitudes POST ---
+// Estas acciones típicamente modifican datos de forma más sustancial
+// y son iniciadas por formularios.
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     // --- Lógica para AÑADIR NUEVA CITA ---
@@ -111,7 +112,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $hora_fin_str = $_POST['hora_fin'] ?? '';
 
         if (empty($fecha_bloqueo) || empty($hora_inicio_str) || empty($hora_fin_str)) {
-            header("Location: dashboard.php?error=Datos incompletos para bloquear horario.");
+            header("Location: dashboard.php?error=" . urlencode("Datos incompletos para bloquear horario."));
             exit();
         }
 
@@ -129,6 +130,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 $fecha_cita = date("Y-m-d", $current_timestamp);
                 $hora_cita = date("H:i:s", $current_timestamp);
+
+                // Pre-verificación de disponibilidad para cada hora del rango
+                $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM citas WHERE fecha_cita = :fecha_cita AND hora_cita = :hora_cita AND estado IN ('pendiente', 'reprogramada', 'bloqueado')");
+                $stmt_check->execute([':fecha_cita' => $fecha_cita, ':hora_cita' => $hora_cita]);
+                if ($stmt_check->fetchColumn() > 0) {
+                    $pdo->rollBack(); // Si alguna hora ya está ocupada, revertir todo y salir
+                    header("Location: dashboard.php?error=" . urlencode("Alguno de los horarios en el rango (" . date("H:i", $current_timestamp) . ") ya está ocupado."));
+                    exit();
+                }
 
                 $stmt = $pdo->prepare("INSERT INTO citas (
                     nombre_paciente,
@@ -199,6 +209,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         try {
             // Opcional: Podrías añadir una verificación de disponibilidad aquí también antes de actualizar
+            // (Similar a la de 'agregar', pero excluyendo la propia cita que se está actualizando)
+            $stmt_check = $pdo->prepare("SELECT COUNT(*) FROM citas WHERE fecha_cita = :fecha_cita AND hora_cita = :hora_cita AND estado IN ('pendiente', 'reprogramada', 'bloqueado') AND id != :id");
+            $stmt_check->execute([
+                ':fecha_cita' => $fecha_cita,
+                ':hora_cita' => $hora_cita,
+                ':id' => $id
+            ]);
+            $count = $stmt_check->fetchColumn();
+
+            if ($count > 0) {
+                header("Location: dashboard.php?error=" . urlencode("El horario seleccionado ya está ocupado por otra cita o bloqueo."));
+                exit();
+            }
+
+
             $stmt = $pdo->prepare("UPDATE citas SET
                 nombre_paciente = :nombre_paciente,
                 cedula_paciente = :cedula_paciente,
@@ -207,7 +232,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 especialidad = :especialidad,
                 fecha_cita = :fecha_cita,
                 hora_cita = :hora_cita,
-                estado = 'reprogramada' -- O el estado que corresponda al editar
+                estado = 'reprogramada' -- Se asume que al editar/reprogramar, el estado cambia a 'reprogramada'
                 WHERE id = :id");
 
             $stmt->execute([
@@ -236,11 +261,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     }
 
+    // Si una solicitud POST llega con una acción no reconocida
+    else {
+        header("Location: dashboard.php?error=" . urlencode("Acción POST no reconocida."));
+        exit();
+    }
+}
 
-    // --- Lógica para CAMBIAR ESTADO DE CITA (Efectuada, Cancelar, Desbloquear Individual, Desbloquear Rango) ---
-    elseif ($accion == 'efectuada' || $accion == 'cancelar' || $accion == 'desbloquear' || $accion == 'desbloquear_rango') {
+// --- Manejo de solicitudes GET ---
+// Estas acciones típicamente realizan operaciones de "un solo clic"
+// como cambiar un estado o borrar.
+elseif ($_SERVER["REQUEST_METHOD"] == "GET") {
+
+    // --- Lógica para CAMBIAR ESTADO DE CITA (Efectuada, Cancelar) o Desbloquear ---
+    if ($accion == 'efectuada' || $accion == 'cancelar' || $accion == 'desbloquear' || $accion == 'desbloquear_rango') {
         $id = $_GET['id'] ?? null; // Para acciones individuales (efectuada, cancelar, desbloquear)
-        $ids_rango = $_GET['ids'] ?? null; // Para la nueva acción desbloquear_rango
+        $ids_rango = $_GET['ids'] ?? null; // Para la acción desbloquear_rango
 
         if (!$id && !$ids_rango) { // Si no hay ID ni IDs de rango, es un error
             header("Location: dashboard.php?error=" . urlencode("ID/IDs de cita no especificado(s)."));
@@ -251,8 +287,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         if ($accion == 'efectuada') {
             $estado_nuevo = 'efectuada';
+            try {
+                $stmt = $pdo->prepare("UPDATE citas SET estado = :estado_nuevo WHERE id = :id");
+                $stmt->execute([':estado_nuevo' => $estado_nuevo, ':id' => $id]);
+                header("Location: dashboard.php?success=" . urlencode("Cita marcada como " . $estado_nuevo . " exitosamente."));
+                exit();
+            } catch (PDOException $e) {
+                header("Location: dashboard.php?error=" . urlencode("Error al actualizar estado: " . $e->getMessage()));
+                exit();
+            }
         } elseif ($accion == 'cancelar') {
             $estado_nuevo = 'cancelada';
+            try {
+                $stmt = $pdo->prepare("UPDATE citas SET estado = :estado_nuevo WHERE id = :id");
+                $stmt->execute([':estado_nuevo' => $estado_nuevo, ':id' => $id]);
+                header("Location: dashboard.php?success=" . urlencode("Cita marcada como " . $estado_nuevo . " exitosamente."));
+                exit();
+            } catch (PDOException $e) {
+                header("Location: dashboard.php?error=" . urlencode("Error al actualizar estado: " . $e->getMessage()));
+                exit();
+            }
         } elseif ($accion == 'desbloquear') { // Desbloquear un ÚNICO horario (borrarlo)
             try {
                 $stmt = $pdo->prepare("DELETE FROM citas WHERE id = :id AND estado = 'bloqueado'");
@@ -288,35 +342,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 exit();
             }
         }
-
-        // Si la acción es 'efectuada' o 'cancelar', y no se ha redirigido aún, actualizamos el estado
-        if (!empty($estado_nuevo) && $id !== null) { // Asegúrate de que $id no sea null para estas acciones
-            try {
-                $stmt = $pdo->prepare("UPDATE citas SET estado = :estado_nuevo WHERE id = :id");
-                $stmt->execute([
-                    ':estado_nuevo' => $estado_nuevo,
-                    ':id' => $id
-                ]);
-                header("Location: dashboard.php?success=" . urlencode("Cita marcada como " . $estado_nuevo . " exitosamente."));
-                exit();
-            } catch (PDOException $e) {
-                header("Location: dashboard.php?error=" . urlencode("Error al actualizar estado: " . $e->getMessage()));
-                exit();
-            }
-        }
     }
-
-    // --- Acción no reconocida ---
+    // Si una solicitud GET llega con una acción no reconocida
     else {
-        header("Location: dashboard.php?error=" . urlencode("Acción no reconocida."));
+        header("Location: dashboard.php?error=" . urlencode("Acción GET no reconocida o inválida."));
         exit();
     }
-} else {
-    // Si la solicitud no es POST, redirigir al dashboard (por seguridad/flujo)
-    header("Location: dashboard.php?error=" . urlencode("Acceso inválido."));
+}
+// Si el método de solicitud HTTP no es ni POST ni GET (por ejemplo, PUT, DELETE, etc.)
+else {
+    header("Location: dashboard.php?error=" . urlencode("Método de solicitud HTTP no permitido."));
     exit();
 }
 
 // La conexión PDO se cierra automáticamente cuando el script termina.
-// No es necesario un $pdo = null; explícito aquí a menos que quieras liberar recursos antes.
 ?>
