@@ -12,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fecha        = $_POST['fecha']        ?? null;
         $hora         = $_POST['hora']         ?? null;
         $estado       = $_POST['estado']       ?? 'pendiente';
-        $notas        = $_POST['notas']        ?? null;
+        $notas        = $_POST['notas']        ?? '';
 
         try {
             // Validar si ya existe una cita para ese doctor en esa fecha y hora
@@ -21,17 +21,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $existe = $stmtCheck->fetchColumn();
 
             if ($existe > 0) {
-                echo "Ya existe una cita asignada para el doctor en esa fecha y hora.";
-            } else {
-                $sql = "INSERT INTO citas (nombre_paciente, doctor, especialidad, telefono_paciente, fecha_cita, hora_cita, estado, notas)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([$nombre, $doctor, $especialidad, $telefono, $fecha, $hora, $estado, $notas]);
-                echo "Cita guardada correctamente.";
+                echo "Ya existe una cita asignada para ese doctor en esa fecha y hora.";
+                exit;
             }
 
+            $sql = "INSERT INTO citas (nombre_paciente, doctor, especialidad, telefono_paciente, fecha_cita, hora_cita, estado, notas)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$nombre, $doctor, $especialidad, $telefono, $fecha, $hora, $estado, $notas]);
+
+            // Redirigir a dashboard o devolver JSON si fue petición AJAX
+            if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+                echo json_encode(["success" => true, "message" => "Cita guardada correctamente"]);
+            } else {
+                header("Location: dashboard.php?mensaje=ok");
+            }
+            exit;
+
         } catch (PDOException $e) {
+            error_log("Error al guardar cita: " . $e->getMessage());
+
+            if (!headers_sent()) {
+                http_response_code(500);
+            }
+
             echo "ERROR al guardar cita: " . $e->getMessage();
+            exit;
         }
     }
 
@@ -45,6 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Content-Type: application/json');
             echo json_encode($citas);
         } catch (PDOException $e) {
+            error_log("Error al consultar citas: " . $e->getMessage());
             echo "ERROR al consultar citas: " . $e->getMessage();
         }
     }
