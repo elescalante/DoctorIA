@@ -1,4 +1,9 @@
 <?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+?>
+
+<?php
 // Incluye el archivo de configuración, que ahora define $pdo
 require_once 'config.php'; // Usa require_once para asegurar que se incluya una sola vez.
 
