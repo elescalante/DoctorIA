@@ -7,16 +7,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     switch ($accion) {
         case 'agregar':
-            $stmt = $conn->prepare("INSERT INTO citas (nombre_paciente, cedula_paciente, email_paciente, telefono_paciente, especialidad, fecha_cita, hora_cita, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente')");
-            $stmt->bind_param("sssssss", $_POST['nombre_paciente'], $_POST['cedula_paciente'], $_POST['email_paciente'], $_POST['telefono_paciente'], $_POST['especialidad'], $_POST['fecha_cita'], $_POST['hora_cita']);
-            $stmt->execute();
+            $stmt = $pdo->prepare("INSERT INTO citas (nombre_paciente, cedula_paciente, email_paciente, telefono_paciente, especialidad, fecha_cita, hora_cita, estado) VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente')");
+            $stmt->execute([
+                $_POST['nombre_paciente'],
+                $_POST['cedula_paciente'],
+                $_POST['email_paciente'],
+                $_POST['telefono_paciente'],
+                $_POST['especialidad'],
+                $_POST['fecha_cita'],
+                $_POST['hora_cita']
+            ]);
             break;
 
         case 'actualizar':
             $id = intval($_POST['id']);
-            $stmt = $conn->prepare("UPDATE citas SET nombre_paciente=?, cedula_paciente=?, email_paciente=?, telefono_paciente=?, especialidad=?, fecha_cita=?, hora_cita=?, estado='reprogramada' WHERE id=?");
-            $stmt->bind_param("sssssssi", $_POST['nombre_paciente'], $_POST['cedula_paciente'], $_POST['email_paciente'], $_POST['telefono_paciente'], $_POST['especialidad'], $_POST['fecha_cita'], $_POST['hora_cita'], $id);
-            $stmt->execute();
+            $stmt = $pdo->prepare("UPDATE citas SET nombre_paciente = ?, cedula_paciente = ?, email_paciente = ?, telefono_paciente = ?, especialidad = ?, fecha_cita = ?, hora_cita = ?, estado = 'reprogramada' WHERE id = ?");
+            $stmt->execute([
+                $_POST['nombre_paciente'],
+                $_POST['cedula_paciente'],
+                $_POST['email_paciente'],
+                $_POST['telefono_paciente'],
+                $_POST['especialidad'],
+                $_POST['fecha_cita'],
+                $_POST['hora_cita'],
+                $id
+            ]);
 
             // ¡AQUÍ LA MAGIA DEL BOT! Notificar al paciente de la reprogramación.
             $nueva_fecha = date("d/m/Y", strtotime($_POST['fecha_cita']));
@@ -31,13 +46,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $fin = new DateTime($fecha . ' ' . $_POST['hora_fin']);
             $intervalo = new DateInterval('PT1H'); // Intervalo de 1 hora
 
-            $stmt = $conn->prepare("INSERT INTO citas (nombre_paciente, telefono_paciente, fecha_cita, hora_cita, estado, notas) VALUES ('Horario Bloqueado', 'N/A', ?, ?, 'bloqueado', 'Bloqueado por el doctor')");
+            $stmt = $pdo->prepare("INSERT INTO citas (nombre_paciente, telefono_paciente, fecha_cita, hora_cita, estado, notas) VALUES ('Horario Bloqueado', 'N/A', ?, ?, 'bloqueado', 'Bloqueado por el doctor')");
             
             while ($inicio < $fin) {
                 $fecha_db = $inicio->format('Y-m-d');
                 $hora_db = $inicio->format('H:i:s');
-                $stmt->bind_param("ss", $fecha_db, $hora_db);
-                $stmt->execute();
+                $stmt->execute([$fecha_db, $hora_db]);
                 $inicio->add($intervalo);
             }
             break;
@@ -50,7 +64,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
     if ($id > 0) {
-        $nuevo_estado = '';
         $sql = '';
 
         switch ($accion) {
@@ -67,9 +80,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         }
 
         if ($sql) {
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param("i", $id);
-            $stmt->execute();
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$id]);
         }
     }
 }
