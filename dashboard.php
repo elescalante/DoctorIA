@@ -110,11 +110,12 @@ try {
                             while($cita = $citas_stmt->fetch(PDO::FETCH_ASSOC)): // fetch() para obtener fila por fila
                         ?>
                                 <tr>
-                                    <td><?= htmlspecialchars($cita['nombre_paciente']) ?></td>
-                                    <td><?= htmlspecialchars($cita['cedula_paciente']) ?></td>
-                                    <td><?= htmlspecialchars($cita['email_paciente']) ?></td>
-                                    <td><?= htmlspecialchars($cita['telefono_paciente']) ?></td>
-                                    <td><?= htmlspecialchars($cita['especialidad']) ?></td>
+                                    <td><?= htmlspecialchars($cita['nombre_paciente'] ?? '') ?></td>
+                                    <td><?= htmlspecialchars($cita['cedula_paciente'] ?? '') ?></td>
+                                    <td><?= htmlspecialchars($cita['email_paciente'] ?? '') ?></td>
+                                    <td><?= htmlspecialchars($cita['telefono_paciente'] ?? '') ?></td>
+                                    <td><?= htmlspecialchars($cita['especialidad'] ?? '') ?></td>
+
                                     <td><?= date("d/m/Y", strtotime($cita['fecha_cita'])) ?> <?= date("h:i A", strtotime($cita['hora_cita'])) ?></td>
                                     <td><span class="badge bg-warning text-dark"><?= ucfirst($cita['estado']) ?></span></td>
                                     <td class="text-center">
