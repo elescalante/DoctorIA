@@ -1,36 +1,27 @@
 <?php
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
-?>
 
-<?php
 // Incluye el archivo de configuración, que ahora define $pdo
-require_once 'config.php'; // Usa require_once para asegurar que se incluya una sola vez.
+require_once 'config.php';
 
 // --- Consulta para citas activas ---
-// Utiliza $pdo en lugar de $conn
 $sql_citas = "SELECT * FROM citas WHERE estado IN ('pendiente', 'reprogramada') ORDER BY fecha_cita, hora_cita";
-$citas_stmt = null; // Usaremos un statement para las citas
+$citas_stmt = null;
 
 try {
-    $citas_stmt = $pdo->query($sql_citas); // Ejecuta la consulta con PDO
+    $citas_stmt = $pdo->query($sql_citas);
 } catch (PDOException $e) {
-    // Manejo de errores en caso de que la consulta falle
     die("ERROR al consultar citas: " . $e->getMessage());
 }
 
 // --- Consulta para horarios bloqueados ---
-// Utiliza $pdo en lugar de $conn
-// Nota: CURDATE() y NOW() son funciones de MySQL.
-// En PostgreSQL, usa CURRENT_DATE o NOW() para obtener la fecha/hora actual.
-// Si tu campo fecha_cita es tipo DATE, CURRENT_DATE es lo más adecuado.
 $sql_bloqueados = "SELECT * FROM citas WHERE estado = 'bloqueado' AND fecha_cita >= CURRENT_DATE ORDER BY fecha_cita, hora_cita";
-$bloqueados_stmt = null; // Usaremos un statement para los bloqueados
+$bloqueados_stmt = null;
 
 try {
-    $bloqueados_stmt = $pdo->query($sql_bloqueados); // Ejecuta la consulta con PDO
+    $bloqueados_stmt = $pdo->query($sql_bloqueados);
 } catch (PDOException $e) {
-    // Manejo de errores en caso de que la consulta falle
     die("ERROR al consultar horarios bloqueados: " . $e->getMessage());
 }
 ?>
@@ -50,6 +41,23 @@ try {
 
 <div class="container mt-4">
     <h1 class="h2 mb-4">🗓️ Panel de Administración de Citas</h1>
+
+    <?php
+    // --- Sección para mostrar mensajes de éxito o error ---
+    if (isset($_GET['success'])) {
+        echo '<div class="alert alert-success alert-dismissible fade show" role="alert">';
+        echo htmlspecialchars($_GET['success']);
+        echo '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+        echo '</div>';
+    }
+
+    if (isset($_GET['error'])) {
+        echo '<div class="alert alert-danger alert-dismissible fade show" role="alert">';
+        echo htmlspecialchars($_GET['error']);
+        echo '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+        echo '</div>';
+    }
+    ?>
 
     <div class="accordion mb-4" id="managementAccordion">
         <div class="accordion-item">
@@ -108,11 +116,8 @@ try {
                     </thead>
                     <tbody>
                         <?php
-                        // Con PDO, puedes usar fetchAll para obtener todos los resultados de una vez
-                        // O iterar directamente sobre el statement como en MySQLi, pero con fetch()
-                        // Corregido: Usar $citas_stmt y rowCount()
                         if ($citas_stmt && $citas_stmt->rowCount() > 0):
-                            while($cita = $citas_stmt->fetch(PDO::FETCH_ASSOC)): // fetch() para obtener fila por fila
+                            while($cita = $citas_stmt->fetch(PDO::FETCH_ASSOC)):
                         ?>
                                 <tr>
                                     <td><?= htmlspecialchars($cita['nombre_paciente'] ?? '') ?></td>
@@ -120,7 +125,6 @@ try {
                                     <td><?= htmlspecialchars($cita['email_paciente'] ?? '') ?></td>
                                     <td><?= htmlspecialchars($cita['telefono_paciente'] ?? '') ?></td>
                                     <td><?= htmlspecialchars($cita['especialidad'] ?? '') ?></td>
-
                                     <td><?= date("d/m/Y", strtotime($cita['fecha_cita'])) ?> <?= date("h:i A", strtotime($cita['hora_cita'])) ?></td>
                                     <td><span class="badge bg-warning text-dark"><?= ucfirst($cita['estado']) ?></span></td>
                                     <td class="text-center">
@@ -146,20 +150,96 @@ try {
         <div class="card-body">
              <div class="table-responsive">
                 <table class="table table-sm">
-                    <thead><tr><th>Fecha</th><th>Hora</th><th class="text-center">Acción</th></tr></thead>
+                    <thead><tr><th>Fecha</th><th>Rango Horario Bloqueado</th><th class="text-center">Acciones</th></tr></thead>
                     <tbody>
                         <?php
-                        // Corregido: Usar $bloqueados_stmt y rowCount()
-                        if ($bloqueados_stmt && $bloqueados_stmt->rowCount() > 0):
-                            while($b = $bloqueados_stmt->fetch(PDO::FETCH_ASSOC)):
+                        // Recuperar y agrupar los horarios bloqueados
+                        $bloqueados_agrupados = [];
+                        if ($bloqueados_stmt && $bloqueados_stmt->rowCount() > 0) {
+                            $todos_bloqueados = $bloqueados_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                            // Agrupar por fecha para identificar rangos
+                            foreach ($todos_bloqueados as $b) {
+                                $fecha_bloqueo = $b['fecha_cita'];
+                                $hora_bloqueo = $b['hora_cita'];
+                                $id_bloqueo = $b['id'];
+
+                                if (!isset($bloqueados_agrupados[$fecha_bloqueo])) {
+                                    $bloqueados_agrupados[$fecha_bloqueo] = [];
+                                }
+                                $bloqueados_agrupados[$fecha_bloqueo][$hora_bloqueo] = $id_bloqueo;
+                            }
+                        }
+
+                        if (!empty($bloqueados_agrupados)):
+                            foreach ($bloqueados_agrupados as $fecha => $horas_por_fecha):
+                                ksort($horas_por_fecha); // Ordenar las horas para la fecha actual
+
+                                $rangos_encontrados = [];
+                                $current_range_start = null;
+                                $ids_in_current_range = [];
+
+                                // Iterar sobre las horas ordenadas para encontrar rangos contiguos
+                                $horas_array = array_keys($horas_por_fecha);
+                                for ($i = 0; $i < count($horas_array); $i++) {
+                                    $current_hora = $horas_array[$i];
+                                    $current_id = $horas_por_fecha[$current_hora];
+
+                                    if ($current_range_start === null) {
+                                        // Iniciar un nuevo rango
+                                        $current_range_start = $current_hora;
+                                        $ids_in_current_range[] = $current_id;
+                                    } else {
+                                        // Calcular la hora esperada si el rango es contiguo (una hora después)
+                                        // strtotime('+1 hour', strtotime($horas_array[$i-1]))
+                                        $expected_next_hora = date('H:i:s', strtotime($horas_array[$i-1]) + 3600); // Sumar 1 hora
+                                        if ($current_hora === $expected_next_hora) {
+                                            // Es parte del rango actual
+                                            $ids_in_current_range[] = $current_id;
+                                        } else {
+                                            // El rango actual terminó, guardar y empezar uno nuevo
+                                            $rangos_encontrados[] = [
+                                                'start' => $current_range_start,
+                                                'end' => $horas_array[$i-1], // La hora final del rango es la hora anterior
+                                                'ids' => $ids_in_current_range
+                                            ];
+                                            $current_range_start = $current_hora;
+                                            $ids_in_current_range = [$current_id];
+                                        }
+                                    }
+                                }
+
+                                // Guardar el último rango si existe
+                                if ($current_range_start !== null) {
+                                    $rangos_encontrados[] = [
+                                        'start' => $current_range_start,
+                                        'end' => $horas_array[count($horas_array) - 1], // La última hora es el fin del último rango
+                                        'ids' => $ids_in_current_range
+                                    ];
+                                }
+
+                                // Mostrar los rangos encontrados para esta fecha
+                                foreach ($rangos_encontrados as $rango) {
+                                    // Los IDs de los bloques dentro de este rango. Se usan para desbloquear el rango completo.
+                                    $all_ids_str = implode(',', $rango['ids']);
+
+                                    // Formatear las horas para la visualización (HH:MM)
+                                    $hora_inicio_display = date("H:i", strtotime($rango['start']));
+                                    // La hora fin del rango es la hora de inicio del último bloque del rango + 1 hora
+                                    $hora_fin_display = date("H:i", strtotime($rango['end']) + 3600);
                         ?>
                                 <tr>
-                                    <td><?= date("d/m/Y", strtotime($b['fecha_cita'])) ?></td>
-                                    <td><?= date("h:i A", strtotime($b['hora_cita'])) ?></td>
-                                    <td class="text-center"><a href="acciones.php?accion=desbloquear&id=<?= $b['id'] ?>" class="btn btn-outline-success btn-sm" title="Desbloquear"><i class="bi bi-unlock-fill"></i></a></td>
+                                    <td><?= date("d/m/Y", strtotime($fecha)) ?></td>
+                                    <td><?= $hora_inicio_display ?> a <?= $hora_fin_display ?></td>
+                                    <td class="text-center">
+                                        <a href="acciones.php?accion=desbloquear_rango&ids=<?= $all_ids_str ?>" class="btn btn-outline-success btn-sm" onclick="return confirm('¿Estás seguro de desbloquear este rango completo?');" title="Desbloquear Rango"><i class="bi bi-unlock-fill"></i></a>
+                                    </td>
                                 </tr>
-                            <?php endwhile; ?>
-                        <?php else: ?>
+                        <?php
+                                } // Fin foreach rangos_encontrados
+                            endforeach; // Fin foreach bloqueados_agrupados
+                        else:
+                        ?>
                             <tr><td colspan="3" class="text-center text-muted">No hay horarios bloqueados.</td></tr>
                         <?php endif; ?>
                     </tbody>
@@ -209,7 +289,12 @@ document.addEventListener('DOMContentLoaded', function () {
             const citaId = this.getAttribute('data-id');
             // Usamos fetch para obtener los datos de la cita del servidor
             fetch(`get_cita.php?id=${citaId}`)
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     if (data.error) {
                         alert(data.error);
@@ -225,15 +310,10 @@ document.addEventListener('DOMContentLoaded', function () {
                         document.getElementById('edit_hora').value = data.hora_cita;
                     }
                 })
-                .catch(error => console.error('Error fetching cita data:', error));
+                .catch(error => console.error('Error al obtener datos de la cita:', error));
         });
     });
 });
 </script>
 </body>
 </html>
-<?php
-// Ya no usamos $conn->close() con PDO.
-// La conexión PDO se cierra automáticamente cuando el script termina.
-// Si necesitas cerrar explícitamente, puedes establecer $pdo = null;
-?>
